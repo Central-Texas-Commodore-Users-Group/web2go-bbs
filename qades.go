@@ -10,17 +10,27 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/alecthomas/kong"
 )
 
-type Qades struct {
-	listener net.Listener
-	wg       sync.WaitGroup
-	close    chan struct{}
-}
+type (
+	// CLIConfig loads command line configuration with defaults.
+	CLIConfig struct {
+		Addr string `help:"Server listen address." default:"127.0.0.1"`
+		Port int    `help:"Server port." default:"8000"`
+	}
 
-func NewServer(port int) *Qades {
+	Qades struct {
+		listener net.Listener
+		wg       sync.WaitGroup
+		close    chan struct{}
+	}
+)
+
+func NewServer(cfg *CLIConfig) *Qades {
 	q := &Qades{}
-	if l, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port)); err != nil {
+	if l, err := net.Listen("tcp", fmt.Sprintf("%s:%d", cfg.Addr, cfg.Port)); err != nil {
 		log.Fatal(err)
 	} else {
 		q.listener = l
@@ -92,10 +102,14 @@ func (q *Qades) echo(conn net.Conn) {
 }
 
 func main() {
+	// parse CLI config
+	cfg := &CLIConfig{}
+	_ = kong.Parse(cfg)
+
 	shutdownSignal := make(chan os.Signal, 1)
 	signal.Notify(shutdownSignal, syscall.SIGINT, syscall.SIGTERM)
 
-	q := NewServer(8000)
+	q := NewServer(cfg)
 
 	<-shutdownSignal
 
