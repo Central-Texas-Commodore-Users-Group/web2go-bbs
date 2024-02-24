@@ -2,36 +2,36 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
 	"time"
-
-	"github.com/alecthomas/kong"
 )
 
 type (
 	// CLIConfig loads command line configuration with defaults.
 	CLIConfig struct {
-		Addr string `help:"Server listen address." default:"127.0.0.1"`
-		Port int    `help:"Server port." default:"8000"`
+		Addr string
+		Port int
 	}
 
 	Qades struct {
 		listener net.Listener
 		wg       sync.WaitGroup
 		close    chan struct{}
+		logger   *slog.Logger
 	}
 )
 
-func NewServer(cfg *CLIConfig) *Qades {
-	q := &Qades{}
+func NewServer(cfg *CLIConfig, h slog.Handler) *Qades {
+	q := &Qades{logger: slog.New(h), close: make(chan struct{})}
 	if l, err := net.Listen("tcp", fmt.Sprintf("%s:%d", cfg.Addr, cfg.Port)); err != nil {
-		log.Fatal(err)
+		q.logger.Error("Error creating listener", err)
 	} else {
 		q.listener = l
 	}
@@ -49,10 +49,10 @@ func (q *Qades) Serve() {
 			case <-q.close:
 				return
 			default:
-				fmt.Printf("connection error: %v\n", err)
+				q.logger.Error("connection error", err)
 			}
 		} else {
-			fmt.Println("connection opened")
+			q.logger.Info("connection opened")
 			q.wg.Add(1)
 			go q.echo(conn)
 		}
@@ -85,13 +85,15 @@ func (q *Qades) echo(conn net.Conn) {
 				if errors.As(err, &nErr) && nErr.Timeout() {
 					continue
 				}
-				fmt.Printf("read error: %v\n", err)
+				q.logger.Error("read error", err)
 				return
 			} else {
 				if bytes == 0 {
-					fmt.Println("empty read, exiting")
+					q.logger.Error("empty read, exiting. is this unnecessary?")
 					return
 				}
+				//slog will marshall the bytes into base64
+				//q.logger.Info("read data", "bytes", readBuff[:bytes], "string", string(readBuff[:bytes]))
 				fmt.Printf("read data: %v | %s\n", readBuff[:bytes], string(readBuff[:bytes]))
 				conn.Write(readBuff[:bytes])
 			}
@@ -103,15 +105,23 @@ func (q *Qades) echo(conn net.Conn) {
 
 func main() {
 	// parse CLI config
-	cfg := &CLIConfig{}
-	_ = kong.Parse(cfg)
+	cfg := new(CLIConfig)
+	flag.StringVar(&cfg.Addr, "addr", "127.0.0.1", "Server listen address.")
+	flag.IntVar(&cfg.Port, "port", 8000, "Server port.")
+	flag.Parse()
+
+	programLevel := new(slog.LevelVar)
+	programLevel.Set(slog.LevelDebug)
+
+	h := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: programLevel, AddSource: true})
 
 	shutdownSignal := make(chan os.Signal, 1)
 	signal.Notify(shutdownSignal, syscall.SIGINT, syscall.SIGTERM)
 
-	q := NewServer(cfg)
+	q := NewServer(cfg, h)
 
 	<-shutdownSignal
+	q.logger.Info("shutting down")
 
 	q.Stop()
 }
