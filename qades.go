@@ -93,12 +93,11 @@ func (q *Qades) echo(conn net.Conn) {
 					return
 				}
 				//slog will marshall the bytes into base64
-				//q.logger.Info("read data", "bytes", readBuff[:bytes], "string", string(readBuff[:bytes]))
+				q.logger.Info("read data", "bytes", fmt.Sprintf("%v", readBuff[:bytes]), "string", string(readBuff[:bytes]))
 				fmt.Printf("read data: %v | %s\n", readBuff[:bytes], string(readBuff[:bytes]))
 				conn.Write(readBuff[:bytes])
 			}
 		}
-
 	}
 
 }
@@ -113,7 +112,7 @@ func main() {
 	programLevel := new(slog.LevelVar)
 	programLevel.Set(slog.LevelDebug)
 
-	h := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: programLevel, AddSource: true})
+	h := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: programLevel, AddSource: true})
 
 	shutdownSignal := make(chan os.Signal, 1)
 	signal.Notify(shutdownSignal, syscall.SIGINT, syscall.SIGTERM)
