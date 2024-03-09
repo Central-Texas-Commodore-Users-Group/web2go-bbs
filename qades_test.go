@@ -39,3 +39,15 @@ func TestNewServer(t *testing.T) {
 	}
 	s.Stop()
 }
+
+func TestCommand(t *testing.T) {
+	if IAC.ToString() != "IAC" {
+		t.Errorf("expected IAC, got %s", IAC.ToString())
+	}
+}
+
+func TestOptions(t *testing.T) {
+	if ExtendedOptionsList.ToString() != "Extended-Options-List" {
+		t.Errorf("expected Extended-Options-List, got %s", ExtendedOptionsList.ToString())
+	}
+}
