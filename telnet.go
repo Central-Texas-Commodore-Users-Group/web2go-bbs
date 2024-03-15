@@ -1,8 +1,21 @@
 package main
 
+import (
+	"log/slog"
+	"net"
+)
+
 type (
-	Command uint8
-	Options uint8
+	Command     uint8
+	Options     uint8
+	parserState uint8
+
+	TelnetParser struct {
+		state   parserState
+		in, out chan byte
+		conn    net.Conn
+		logger  *slog.Logger
+	}
 )
 
 func (c Command) ToString() string {
@@ -165,6 +178,14 @@ func (o Options) ToString() string {
 }
 
 const (
+	handleData   parserState = 0x00
+	handleIAC    parserState = 0x01
+	handleOption parserState = 0x02
+	handleWill   parserState = 0x03
+	handleWont   parserState = 0x04
+	handleDo     parserState = 0x05
+	handleDont   parserState = 0x06
+
 	// https://www.rfc-editor.org/rfc/rfc854.html
 	SE               Command = 0xF0
 	NOP              Command = 0xF1
@@ -242,3 +263,75 @@ const (
 	// 0x8D - 0xFE
 	ExtendedOptionsList Options = 0xFF
 )
+
+func (tp *TelnetParser) Parse() {
+	tp.state = handleData
+
+	for b := range tp.in {
+		switch tp.state {
+		case handleData:
+			if Command(b) == IAC {
+				tp.state = handleIAC
+			} else {
+				tp.out <- b
+			}
+		case handleIAC:
+			switch Command(b) {
+			case NOP:
+				tp.state = handleData
+			case SE:
+				fallthrough
+			case DataMark:
+				fallthrough
+			case Break:
+				fallthrough
+			case InterruptProcess:
+				fallthrough
+			case AbortOutput:
+				fallthrough
+			case EraseLine:
+				fallthrough
+			case EraseCharacter:
+				fallthrough
+			case GoAhead:
+				fallthrough
+			case SB:
+				//unimplemented
+				tp.state = handleData
+			case AreYouThere:
+				if written, err := tp.conn.Write([]byte{byte(IAC), byte(NOP)}); err != nil {
+					tp.logger.Error("Unable to replay to AreYouThere", err)
+				} else if written != 2 {
+					tp.logger.Error("Failed to send full ACK for AreYouThere")
+				}
+				tp.state = handleData
+			case WILL:
+				tp.state = handleWill
+			case WONT:
+				tp.state = handleWont
+			case DO:
+				tp.state = handleDo
+			case DONT:
+				tp.state = handleDont
+			case IAC:
+				// escaped byte
+				tp.out <- b
+				tp.state = handleData
+			default:
+				tp.logger.Error("Unknown IAC byte", "IAC", b)
+				tp.state = handleData
+			}
+		case handleDo:
+			fallthrough
+		case handleDont:
+			fallthrough
+		case handleWill:
+			fallthrough
+		case handleWont:
+			fallthrough
+		case handleOption:
+			// unimplemented
+			tp.state = handleData
+		}
+	}
+}
