@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
 	"net"
 )
@@ -10,11 +11,22 @@ type (
 	Options     uint8
 	parserState uint8
 
-	TelnetParser struct {
-		state   parserState
-		in, out chan byte
-		conn    net.Conn
-		logger  *slog.Logger
+	ConnHandler interface {
+		HandleByte(uint8)
+		ForwardByte(uint8)
+		HandleCommand(uint8)
+		SendReply([]byte) error
+	}
+
+	TelnetHandler struct {
+		state       parserState
+		conn        net.Conn
+		nextHandler ConnHandler
+		logger      *slog.Logger
+	}
+
+	EchoHandler struct {
+		conn net.Conn
 	}
 )
 
@@ -187,8 +199,8 @@ const (
 	handleDont   parserState = 0x06
 
 	// https://www.rfc-editor.org/rfc/rfc854.html
-	SE               Command = 0xF0
-	NOP              Command = 0xF1
+	SE               Command = 0xF0 // End subnegotiation
+	NOP              Command = 0xF1 // No Operation
 	DataMark         Command = 0xF2
 	Break            Command = 0xF3
 	InterruptProcess Command = 0xF4
@@ -197,7 +209,7 @@ const (
 	EraseCharacter   Command = 0xF7
 	EraseLine        Command = 0xF8
 	GoAhead          Command = 0xF9
-	SB               Command = 0xFA
+	SB               Command = 0xFA // Begin Subnegotiation
 	// Option Codes
 	WILL Command = 0xFB
 	WONT Command = 0xFC
@@ -264,74 +276,99 @@ const (
 	ExtendedOptionsList Options = 0xFF
 )
 
-func (tp *TelnetParser) Parse() {
-	tp.state = handleData
-
-	for b := range tp.in {
-		switch tp.state {
-		case handleData:
-			if Command(b) == IAC {
-				tp.state = handleIAC
-			} else {
-				tp.out <- b
-			}
-		case handleIAC:
-			switch Command(b) {
-			case NOP:
-				tp.state = handleData
-			case SE:
-				fallthrough
-			case DataMark:
-				fallthrough
-			case Break:
-				fallthrough
-			case InterruptProcess:
-				fallthrough
-			case AbortOutput:
-				fallthrough
-			case EraseLine:
-				fallthrough
-			case EraseCharacter:
-				fallthrough
-			case GoAhead:
-				fallthrough
-			case SB:
-				//unimplemented
-				tp.state = handleData
-			case AreYouThere:
-				if written, err := tp.conn.Write([]byte{byte(IAC), byte(NOP)}); err != nil {
-					tp.logger.Error("Unable to replay to AreYouThere", err)
-				} else if written != 2 {
-					tp.logger.Error("Failed to send full ACK for AreYouThere")
-				}
-				tp.state = handleData
-			case WILL:
-				tp.state = handleWill
-			case WONT:
-				tp.state = handleWont
-			case DO:
-				tp.state = handleDo
-			case DONT:
-				tp.state = handleDont
-			case IAC:
-				// escaped byte
-				tp.out <- b
-				tp.state = handleData
-			default:
-				tp.logger.Error("Unknown IAC byte", "IAC", b)
-				tp.state = handleData
-			}
-		case handleDo:
-			fallthrough
-		case handleDont:
-			fallthrough
-		case handleWill:
-			fallthrough
-		case handleWont:
-			fallthrough
-		case handleOption:
-			// unimplemented
-			tp.state = handleData
-		}
+func (th *TelnetHandler) SendReply(bytes []byte) error {
+	if written, err := th.conn.Write(bytes); err != nil {
+		return fmt.Errorf("error when writing bytes: %w", err)
+	} else if written != len(bytes) {
+		return fmt.Errorf("failed to send full message")
+		// TODO: attempt to finish sending message?
 	}
+	return nil
+}
+
+func (th *TelnetHandler) ForwardByte(b uint8) {
+	th.nextHandler.HandleByte(b)
+}
+
+func (th *TelnetHandler) HandleByte(b uint8) {
+	switch th.state {
+	case handleData:
+		if Command(b) == IAC {
+			th.state = handleIAC
+		} else {
+			th.ForwardByte(b)
+		}
+	case handleIAC:
+		switch Command(b) {
+		case NOP:
+			th.state = handleData
+		case SE:
+			fallthrough
+		case DataMark:
+			fallthrough
+		case Break:
+			fallthrough
+		case InterruptProcess:
+			fallthrough
+		case AbortOutput:
+			fallthrough
+		case EraseLine:
+			fallthrough
+		case EraseCharacter:
+			fallthrough
+		case GoAhead:
+			fallthrough
+		case SB:
+			//unimplemented
+			th.state = handleData
+		case AreYouThere:
+			if err := th.SendReply([]byte{byte(IAC), byte(NOP)}); err != nil {
+				th.logger.Error("Unable to replay to AreYouThere", err)
+			}
+			th.state = handleData
+		case WILL:
+			th.state = handleWill
+		case WONT:
+			th.state = handleWont
+		case DO:
+			th.state = handleDo
+		case DONT:
+			th.state = handleDont
+		case IAC:
+			// escaped byte
+			th.ForwardByte(b)
+			th.state = handleData
+		default:
+			th.logger.Error("Unknown IAC byte", "IAC", b)
+			th.state = handleData
+		}
+	case handleDo:
+		fallthrough
+	case handleDont:
+		fallthrough
+	case handleWill:
+		fallthrough
+	case handleWont:
+		fallthrough
+	case handleOption:
+		// unimplemented
+		th.state = handleData
+	}
+}
+
+func (eh *EchoHandler) HandleByte(b uint8) {
+	eh.SendReply([]byte{b})
+}
+
+func (eh *EchoHandler) ForwardByte(_ uint8) {
+	// Not Implemented
+}
+
+func (eh *EchoHandler) HandleCommand(_ uint8) {
+	// Not Implemented
+}
+
+func (eh *EchoHandler) SendReply(bytes []byte) error {
+	eh.conn.Write(bytes)
+	return nil
 }

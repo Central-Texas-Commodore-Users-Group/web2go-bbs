@@ -72,7 +72,24 @@ func (q *Qades) echo(conn net.Conn) {
 
 	var nErr *net.OpError
 
+	eh := &EchoHandler{
+		conn: conn,
+	}
+
+	th := &TelnetHandler{
+		state:       handleData,
+		conn:        conn,
+		nextHandler: eh,
+		logger:      q.logger,
+	}
+
 	readBuff := make([]byte, 1024)
+
+	var doTerm []byte
+
+	doTerm = append(doTerm, uint8(IAC), uint8(DO), uint8(TerminalType))
+
+	conn.Write(doTerm)
 
 	for {
 		select {
@@ -95,7 +112,9 @@ func (q *Qades) echo(conn net.Conn) {
 				//slog will marshall the bytes into base64
 				q.logger.Info("read data", "bytes", fmt.Sprintf("%v", readBuff[:bytes]), "string", string(readBuff[:bytes]))
 				fmt.Printf("read data: %v | %s\n", readBuff[:bytes], string(readBuff[:bytes]))
-				conn.Write(readBuff[:bytes])
+				for _, b := range readBuff[:bytes] {
+					th.HandleByte(uint8(b))
+				}
 			}
 		}
 	}
