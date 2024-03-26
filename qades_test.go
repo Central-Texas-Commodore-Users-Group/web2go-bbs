@@ -6,6 +6,9 @@ import (
 	"net"
 	"os"
 	"testing"
+
+	"github.com/Central-Texas-Commodore-Users-Group/web2go-bbs/telnet"
+	"github.com/Central-Texas-Commodore-Users-Group/web2go-bbs/telnet/options"
 )
 
 var tests = []string{"hello", "お早う", "☀️"}
@@ -41,13 +44,13 @@ func TestNewServer(t *testing.T) {
 }
 
 func TestCommand(t *testing.T) {
-	if IAC.ToString() != "IAC" {
-		t.Errorf("expected IAC, got %s", IAC.ToString())
+	if telnet.IAC.ToString() != "IAC" {
+		t.Errorf("expected IAC, got %s", telnet.IAC.ToString())
 	}
 }
 
 func TestOptions(t *testing.T) {
-	if ExtendedOptionsList.ToString() != "Extended-Options-List" {
-		t.Errorf("expected Extended-Options-List, got %s", ExtendedOptionsList.ToString())
+	if options.TerminalType.ToString() != "Terminal Type" {
+		t.Errorf("expected Extended-Options-List, got %s", options.TerminalType.ToString())
 	}
 }

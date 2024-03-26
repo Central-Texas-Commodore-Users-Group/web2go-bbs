@@ -11,6 +11,9 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/Central-Texas-Commodore-Users-Group/web2go-bbs/telnet"
+	"github.com/Central-Texas-Commodore-Users-Group/web2go-bbs/telnet/options"
 )
 
 type (
@@ -72,24 +75,12 @@ func (q *Qades) echo(conn net.Conn) {
 
 	var nErr *net.OpError
 
-	eh := &EchoHandler{
-		conn: conn,
-	}
-
-	th := &TelnetHandler{
-		state:       handleData,
-		conn:        conn,
-		nextHandler: eh,
-		logger:      q.logger,
-	}
+	eh := telnet.NewEchoHandler(conn)
+	th := telnet.NewTelnetHandler(conn, eh, q.logger)
 
 	readBuff := make([]byte, 1024)
 
-	var doTerm []byte
-
-	doTerm = append(doTerm, uint8(IAC), uint8(DO), uint8(TerminalType))
-
-	conn.Write(doTerm)
+	conn.Write(options.DoTerminalType())
 
 	for {
 		select {
